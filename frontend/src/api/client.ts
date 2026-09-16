@@ -14,7 +14,8 @@ import axios from 'axios'
 import type {
   SearchModel, VideoModel, StreamModel, ChannelModel,
   CommentsModel, HistoryModel, WatchlistModel, PlaylistModel,
-  PlaylistWithVideos, SubscriptionModel, DownloadModel, ServiceInfo
+  PlaylistWithVideos, SubscriptionModel, DownloadModel, ServiceInfo,
+  RemotePlaylist, RemotePlaylistPage
 } from '../types'
 
 const api = axios.create({
@@ -83,6 +84,18 @@ export const extractorApi = {
    */
   getComments: (url: string) =>
     api.get<CommentsModel>('/comments', { params: { url } }).then(r => r.data),
+
+  /**
+   * Get a remote (YouTube) playlist by its full URL — first page of videos.
+   */
+  getPlaylist: (url: string) =>
+    api.get<RemotePlaylist>('/playlist', { params: { url }, timeout: 60_000 }).then(r => r.data),
+
+  /**
+   * Get the next page of a remote playlist using the token from a previous response.
+   */
+  getPlaylistPage: (url: string, page: string) =>
+    api.get<RemotePlaylistPage>('/playlist', { params: { url, page }, timeout: 60_000 }).then(r => r.data),
 }
 
 // ─────────────────────────────────────────────

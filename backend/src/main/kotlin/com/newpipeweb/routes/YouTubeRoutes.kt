@@ -148,3 +148,23 @@ fun Route.commentRoutes() {
         call.respond(comments)
     }
 }
+
+/**
+ * Remote playlist (YouTube playlists and mixes) — accepts a full playlist URL.
+ * GET /playlist?url=https://www.youtube.com/playlist?list=PL...          → first page
+ * GET /playlist?url=...&page=<token from previous response>            → next page
+ *
+ * Not to be confused with /playlists (local user playlists).
+ */
+fun Route.remotePlaylistRoutes() {
+    get("/playlist") {
+        val url = call.parameters["url"]?.trim()?.takeIf { it.isNotBlank() }
+            ?: return@get call.respond(HttpStatusCode.BadRequest, "Missing 'url' parameter")
+        val page = call.parameters["page"]?.trim()?.takeIf { it.isNotBlank() }
+        if (page == null) {
+            call.respond(ExtractorService.getPlaylist(url))
+        } else {
+            call.respond(ExtractorService.getPlaylistPage(url, page))
+        }
+    }
+}

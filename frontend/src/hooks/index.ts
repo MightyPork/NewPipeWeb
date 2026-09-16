@@ -1,4 +1,5 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from '@tanstack/react-query';
+import type { RemotePlaylist, VideoModel } from '../types';
 import { storageSettingsApi, extractorApi, youtubeApi, historyApi, watchlistApi, playlistApi, subscriptionApi, feedApi, downloadApi } from '../api/client';
 
 export function useStorageSettings() {
@@ -70,6 +71,28 @@ export function useComments(videoId: string) {
     queryFn: () => extractorApi.getComments(videoId.startsWith('http') ? videoId : `https://www.youtube.com/watch?v=${videoId}`),
     enabled: !!videoId,
   })
+}
+
+/**
+ * Remote (YouTube) playlist with "load more" pagination.
+ * The first page carries the playlist metadata; later pages only videos.
+ */
+export function useRemotePlaylist(url: string) {
+  const query = useInfiniteQuery({
+    queryKey: ['remotePlaylist', url],
+    queryFn: ({ pageParam }) =>
+      pageParam
+        ? extractorApi.getPlaylistPage(url, pageParam).then(p => ({ ...p, info: null as RemotePlaylist | null }))
+        : extractorApi.getPlaylist(url).then(p => ({ videos: p.videos, nextPage: p.nextPage, info: p })),
+    initialPageParam: '' as string,
+    getNextPageParam: last => last.nextPage || undefined,
+    enabled: !!url,
+    staleTime: 1000 * 60 * 10,
+  })
+
+  const info: RemotePlaylist | null = query.data?.pages[0]?.info ?? null
+  const videos: VideoModel[] = query.data?.pages.flatMap(p => p.videos) ?? []
+  return { ...query, info, videos }
 }
 
 // ─────────────────────────────────────────────

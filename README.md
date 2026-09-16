@@ -53,6 +53,7 @@ No Google account required. No ads. No tracking.
 | 🔔 Subscriptions | Subscribe to channels — stored locally, no Google account |
 | 🔖 Watchlist | Save videos to watch later |
 | 📚 Playlists | Create and manage local playlists |
+| ▶️ YouTube playlists | Open YouTube playlists from search or by URL, play them in order with a queue |
 | 🕐 History | Full watch history with resume positions |
 | ⬇️ Downloads | Download video or audio to your server |
 | ⏭️ SponsorBlock | Opt-in automatic sponsor segment skipping |
@@ -412,6 +413,9 @@ Results come from YouTube (and other supported services if the URL is recognized
 
 Recent searches are saved locally and shown as you type.
 
+**Pasting a YouTube link** (video, video with `&list=`, or playlist) into the search
+bar opens it directly instead of searching.
+
 ### Watching a Video
 
 Click any video card to open the watch page.
@@ -488,6 +492,18 @@ View your watchlist from the left sidebar.
 1. Go to **Library**.
 2. Click on any playlist card.
 3. Videos are listed in order. Click any to watch.
+
+### YouTube Playlists
+
+YouTube's own playlists show up in search results (above the videos) and can be
+opened by pasting a `youtube.com/playlist?list=…` URL into the search bar.
+
+The playlist page lists all videos (with **Load more** for long playlists) and has a
+**Play all** button. While playing from a playlist the watch page shows the queue in
+the right column, offers previous/next buttons in the toolbar, and automatically
+plays the next video when the current one ends.
+
+Mixes (`RD…` lists) are currently not supported by NewPipeExtractor.
 
 ### Watch History
 
@@ -614,6 +630,8 @@ In Docker, the frontend nginx config proxies `/api/*` to the backend.
 | GET | `/channel/{id}` | Get channel info + recent videos |
 | GET | `/trending` | Get trending videos |
 | GET | `/comments/{videoId}` | Get video comments |
+| GET | `/playlist?url={playlistUrl}` | Get a YouTube playlist: metadata + first page of videos + `nextPage` token |
+| GET | `/playlist?url={playlistUrl}&page={token}` | Get the next page of a YouTube playlist |
 
 ### History
 

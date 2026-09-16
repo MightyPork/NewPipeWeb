@@ -32,6 +32,13 @@ import org.schabi.newpipe.extractor.channel.ChannelInfo
 import org.schabi.newpipe.extractor.comments.CommentsInfo
 import org.schabi.newpipe.extractor.InfoItem
 import org.schabi.newpipe.extractor.kiosk.KioskInfo
+import org.schabi.newpipe.extractor.Page
+import org.schabi.newpipe.extractor.playlist.PlaylistInfo
+import org.schabi.newpipe.extractor.playlist.PlaylistInfoItem
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import java.util.Base64
 import org.schabi.newpipe.extractor.localization.ContentCountry
 import org.schabi.newpipe.extractor.localization.Localization
 import org.schabi.newpipe.extractor.search.SearchInfo
@@ -175,11 +182,17 @@ object ExtractorService {
                 }
             }
 
+        val playlists = searchInfo.relatedItems
+            .filterNotNull()
+            .filterIsInstance<PlaylistInfoItem>()
+            .mapNotNull { item -> runCatching { toPlaylistItemModel(item, serviceName) }.getOrNull() }
+
         return SearchModel(
-            query    = query,
-            service  = serviceName,
-            items    = items,
-            nextPage = searchInfo.nextPage?.url
+            query     = query,
+            service   = serviceName,
+            items     = items,
+            nextPage  = searchInfo.nextPage?.url,
+            playlists = playlists
         )
     }
 
@@ -260,6 +273,122 @@ object ExtractorService {
             service       = serviceKeyFromExtractorId(service.serviceId),
             thumbnailUrl  = streamInfo.thumbnails.lastOrNull()?.url ?: ""
         )
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // REMOTE PLAYLISTS (YouTube playlists / mixes, by full URL)
+    // ─────────────────────────────────────────────────────────
+
+    /**
+     * Opaque, self-contained continuation token for playlist pagination.
+     * Wraps NewPipeExtractor's [Page] (which may carry a POST body and cookies)
+     * as base64(JSON) so the frontend can hand it back to GET /playlist?page=.
+     */
+    @Serializable
+    private data class PageToken(
+        val url: String? = null,
+        val id: String? = null,
+        val ids: List<String>? = null,
+        val cookies: Map<String, String>? = null,
+        val body: String? = null   // base64
+    )
+
+    private val pageTokenJson = Json { encodeDefaults = false; ignoreUnknownKeys = true }
+
+    private fun encodePage(page: Page?): String? {
+        if (page == null || !Page.isValid(page)) return null
+        val token = PageToken(
+            url     = page.url,
+            id      = page.id,
+            ids     = page.ids,
+            cookies = page.cookies,
+            body    = page.body?.let { Base64.getEncoder().encodeToString(it) }
+        )
+        return Base64.getUrlEncoder().withoutPadding()
+            .encodeToString(pageTokenJson.encodeToString(token).toByteArray())
+    }
+
+    private fun decodePage(token: String): Page {
+        val json = String(Base64.getUrlDecoder().decode(token))
+        val t = pageTokenJson.decodeFromString<PageToken>(json)
+        return Page(t.url, t.id, t.ids, t.cookies, t.body?.let { Base64.getDecoder().decode(it) })
+    }
+
+    private fun toPlaylistItemModel(item: PlaylistInfoItem, serviceName: String) = RemotePlaylistItemModel(
+        url          = item.url ?: "",
+        name         = item.name ?: "Unknown",
+        uploader     = item.uploaderName ?: "",
+        uploaderUrl  = item.uploaderUrl ?: "",
+        thumbnailUrl = item.thumbnails.lastOrNull()?.url ?: "",
+        streamCount  = item.streamCount,
+        service      = serviceName
+    )
+
+    private fun toVideoModel(item: StreamInfoItem, serviceName: String, uploaderFallback: String = "Unknown") = VideoModel(
+        id           = extractId(item.url),
+        title        = item.name ?: "Unknown",
+        uploader     = item.uploaderName ?: uploaderFallback,
+        uploaderUrl  = item.uploaderUrl ?: "",
+        duration     = item.duration,
+        viewCount    = item.viewCount,
+        uploadDate   = item.textualUploadDate ?: "",
+        thumbnailUrl = item.thumbnails.lastOrNull()?.url ?: "",
+        isLive       = item.streamType == StreamType.LIVE_STREAM || item.streamType == StreamType.AUDIO_LIVE_STREAM,
+        url          = item.url ?: "",
+        service      = serviceName
+    )
+
+    /**
+     * Fetch a remote playlist (first page) by its full URL, e.g.
+     * https://www.youtube.com/playlist?list=PL... or a mix URL
+     * https://www.youtube.com/watch?v=ID&list=RD...
+     */
+    fun getPlaylist(url: String): RemotePlaylistModel {
+        val service     = serviceFromUrl(url)
+        val serviceName = serviceKeyFromExtractorId(service.serviceId)
+        val info = try {
+            PlaylistInfo.getInfo(service, url)
+        } catch (e: Exception) {
+            throw IllegalArgumentException("Playlist extraction failed for $url: ${e.message}")
+        }
+
+        val videos = info.relatedItems
+            .filterNotNull()
+            .mapNotNull { item -> runCatching { toVideoModel(item, serviceName, info.uploaderName ?: "Unknown") }.getOrNull() }
+
+        return RemotePlaylistModel(
+            url          = info.url ?: url,
+            name         = info.name ?: "Playlist",
+            uploader     = info.uploaderName ?: "",
+            uploaderUrl  = info.uploaderUrl ?: "",
+            thumbnailUrl = info.thumbnails.lastOrNull()?.url ?: videos.firstOrNull()?.thumbnailUrl ?: "",
+            bannerUrl    = info.banners.lastOrNull()?.url ?: "",
+            description  = info.description?.content ?: "",
+            streamCount  = info.streamCount,
+            videos       = videos,
+            nextPage     = encodePage(info.nextPage),
+            service      = serviceName
+        )
+    }
+
+    /** Fetch the next page of a remote playlist using a token from a previous response. */
+    fun getPlaylistPage(url: String, pageToken: String): RemotePlaylistPageModel {
+        val service     = serviceFromUrl(url)
+        val serviceName = serviceKeyFromExtractorId(service.serviceId)
+        val page = try {
+            decodePage(pageToken)
+        } catch (e: Exception) {
+            throw IllegalArgumentException("Invalid playlist page token")
+        }
+        val result = try {
+            PlaylistInfo.getMoreItems(service, url, page)
+        } catch (e: Exception) {
+            throw IllegalArgumentException("Playlist page extraction failed for $url: ${e.message}")
+        }
+        val videos = result.items
+            .filterNotNull()
+            .mapNotNull { item -> runCatching { toVideoModel(item, serviceName) }.getOrNull() }
+        return RemotePlaylistPageModel(videos = videos, nextPage = encodePage(result.nextPage))
     }
 
     // ─────────────────────────────────────────────────────────

@@ -23,6 +23,7 @@ fun Application.configureRouting() {
         channelRoutes()      // GET /channel?url= or /channel/{youtubeId}
         trendingRoutes()     // GET /trending?service=
         commentRoutes()      // GET /comments?url= or /comments/{youtubeId}
+        remotePlaylistRoutes() // GET /playlist?url=[&page=] — YouTube playlists / mixes
 
         // ── Local database routes (user data) ─────────────────
         historyRoutes()      // GET/POST/DELETE /history

@@ -3,6 +3,7 @@
  *
  * The video watch page. Handles:
  * - Video playback with quality selection
+ * - Playlist queue (?list=<playlist url>) with autoplay of the next item
  * - Subtitle track switching
  * - Picture-in-Picture (PiP)
  * - Background audio mode (audio-only stream)
@@ -16,14 +17,14 @@
  * - Related videos sidebar
  */
 
-import { useParams, useSearchParams, Link } from 'react-router-dom'
+import { useParams, useSearchParams, Link, useNavigate } from 'react-router-dom'
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import Hls from 'hls.js'
 import {
   useStream, useComments, useAddToHistory,
   useSubscribe, useSubscriptions, useUnsubscribe,
   useHistory, useAddToWatchlist, useWatchlist,
-  useRemoveFromWatchlist, useStartDownload
+  useRemoveFromWatchlist, useStartDownload, useRemotePlaylist,
 } from '../hooks'
 import { useSponsorBlock } from '../hooks/useSponsorBlock'
 import VideoCard from '../components/video/VideoCard'
@@ -33,20 +34,26 @@ import { useAppStore } from '../store/useAppStore'
 import {
   ThumbsUp, Download, BookmarkPlus, BookmarkCheck,
   Bell, BellOff, ListVideo, PictureInPicture2,
-  Headphones, Subtitles, SkipForward,
+  Headphones, Subtitles, SkipForward, SkipBack,
 } from 'lucide-react'
 import type { StreamUrl, SubtitleTrack } from '../types'
-import { pickDefaultStream, proxyMediaUrl, isHlsSource } from '../utils/playback'
+import {
+  pickDefaultStream, proxyMediaUrl, isHlsSource,
+  formatDuration, watchPath, remotePlaylistPath,
+} from '../utils/playback'
 
 export default function Watch() {
   const { id } = useParams<{ id: string }>()
   const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
   // Support both /watch/:id (YouTube) and /watch?url= (any service)
   const contentUrl = searchParams.get('url') ?? (id ? `https://www.youtube.com/watch?v=${id}` : '')
   const youtubeVideoId =
     id ??
     contentUrl.match(/[?&]v=([^&]+)/)?.[1] ??
     ''
+  // Playing inside a remote (YouTube) playlist: ?list=<playlist url>
+  const playlistUrl = searchParams.get('list') ?? ''
 
   // ─── Data fetching ────────────────────────────────────────
   const { data: stream, isLoading, isError, refetch } = useStream(contentUrl)
@@ -54,6 +61,7 @@ export default function Watch() {
   const { data: history } = useHistory()
   const { data: watchlist } = useWatchlist()
   const { data: subscriptions } = useSubscriptions()
+  const playlist = useRemotePlaylist(playlistUrl)
 
   // ─── Mutations ────────────────────────────────────────────
   const addToHistory = useAddToHistory()
@@ -102,6 +110,37 @@ export default function Watch() {
   }, [useHls, hlsSourceUrl, selectedStream?.url])
 
   const playbackUrl = playbackSourceUrl ? proxyMediaUrl(playbackSourceUrl, stream?.title) : ''
+
+  // ─── Playlist queue ───────────────────────────────────────
+  const queue = playlist.videos
+  const queueIndex = queue.findIndex(v => v.id === contentKey || (id && v.id === id))
+  const nextInQueue = queueIndex >= 0 ? queue[queueIndex + 1] : undefined
+  const prevInQueue = queueIndex > 0 ? queue[queueIndex - 1] : undefined
+  const currentQueueItemRef = useRef<HTMLAnchorElement>(null)
+
+  // If the current video is beyond the loaded pages, keep loading until we find it.
+  useEffect(() => {
+    if (!playlistUrl || !playlist.info) return
+    if (queueIndex === -1 && playlist.hasNextPage && !playlist.isFetchingNextPage) {
+      playlist.fetchNextPage()
+    }
+  }, [playlistUrl, playlist.info, queueIndex, playlist.hasNextPage, playlist.isFetchingNextPage])
+
+  // Pre-load the following page when we are near the end of what is loaded.
+  useEffect(() => {
+    if (queueIndex >= 0 && queueIndex >= queue.length - 2 && playlist.hasNextPage && !playlist.isFetchingNextPage) {
+      playlist.fetchNextPage()
+    }
+  }, [queueIndex, queue.length, playlist.hasNextPage, playlist.isFetchingNextPage])
+
+  useEffect(() => {
+    currentQueueItemRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [queueIndex, queue.length])
+
+  const goToQueueItem = useCallback((video: { id: string; url?: string } | undefined) => {
+    if (!video) return
+    navigate(watchPath(video, playlistUrl))
+  }, [navigate, playlistUrl])
 
   // ─────────────────────────────────────────────────────────
   // On stream load: pick best quality stream + restore resume position
@@ -221,6 +260,11 @@ export default function Watch() {
       })
     }
   }, [stream?.id, sponsorBlockEnabled, segments, getSkipTarget, contentKey, isYoutube])
+
+  // Autoplay the next playlist item when the video ends
+  const handleEnded = () => {
+    if (nextInQueue) goToQueueItem(nextInQueue)
+  }
 
   // ─────────────────────────────────────────────────────────
   // Volume + playback rate change handlers (persist to store)
@@ -372,6 +416,7 @@ export default function Watch() {
               onTimeUpdate={handleTimeUpdate}
               onVolumeChange={handleVolumeChange}
               onRateChange={handleRateChange}
+              onEnded={handleEnded}
             >
               {selectedSubtitle && subtitlesEnabled && !useHls && (
                 <track
@@ -403,6 +448,30 @@ export default function Watch() {
 
         {/* ── Player toolbar ─────────────────────────────── */}
         <div className="mt-3 flex items-center gap-2 flex-wrap">
+
+          {/* Playlist prev / next */}
+          {playlistUrl && queue.length > 0 && (
+            <>
+              <button
+                onClick={() => goToQueueItem(prevInQueue)}
+                disabled={!prevInQueue}
+                title="Previous in playlist"
+                className="p-2 rounded-lg bg-neutral-800 text-neutral-300 hover:bg-neutral-700
+                           disabled:opacity-40 disabled:hover:bg-neutral-800 transition-colors"
+              >
+                <SkipBack size={15} />
+              </button>
+              <button
+                onClick={() => goToQueueItem(nextInQueue)}
+                disabled={!nextInQueue}
+                title="Next in playlist"
+                className="p-2 rounded-lg bg-neutral-800 text-neutral-300 hover:bg-neutral-700
+                           disabled:opacity-40 disabled:hover:bg-neutral-800 transition-colors"
+              >
+                <SkipForward size={15} />
+              </button>
+            </>
+          )}
 
           {/* Picture-in-Picture */}
           {document.pictureInPictureEnabled && (
@@ -610,8 +679,75 @@ export default function Watch() {
         </div>
       </div>
 
-      {/* ── Right column: related videos ──────────────────── */}
+      {/* ── Right column: playlist queue + related videos ─── */}
       <div className="w-full lg:w-96 shrink-0">
+
+        {playlistUrl && (
+          <div className="mb-6 bg-neutral-900 rounded-xl overflow-hidden">
+            <div className="p-3 border-b border-neutral-800">
+              {playlist.info ? (
+                <>
+                  <Link to={remotePlaylistPath(playlistUrl)} className="font-semibold text-sm hover:text-red-400 line-clamp-2">
+                    {playlist.info.name}
+                  </Link>
+                  <p className="text-xs text-neutral-400 mt-0.5">
+                    {playlist.info.uploader && <>{playlist.info.uploader} · </>}
+                    {queueIndex >= 0 ? `${queueIndex + 1} / ` : ''}
+                    {playlist.info.streamCount >= 0 ? playlist.info.streamCount : queue.length}
+                  </p>
+                </>
+              ) : playlist.isError ? (
+                <p className="text-xs text-red-400">Could not load playlist.</p>
+              ) : (
+                <p className="text-xs text-neutral-400">Loading playlist…</p>
+              )}
+            </div>
+            {queue.length > 0 && (
+              <div className="max-h-[420px] overflow-y-auto">
+                {queue.map((video, index) => {
+                  const isCurrent = index === queueIndex
+                  return (
+                    <Link
+                      key={`${video.id}-${index}`}
+                      ref={isCurrent ? currentQueueItemRef : undefined}
+                      to={watchPath(video, playlistUrl)}
+                      className={`flex items-center gap-2 px-2 py-1.5 text-sm transition-colors
+                        ${isCurrent ? 'bg-neutral-800' : 'hover:bg-neutral-800/60'}`}
+                    >
+                      <span className="w-5 text-center text-xs text-neutral-500 shrink-0">
+                        {isCurrent ? '▶' : index + 1}
+                      </span>
+                      <div className="relative w-24 aspect-video shrink-0 bg-neutral-800 rounded overflow-hidden">
+                        <img
+                          src={video.thumbnailUrl} alt="" loading="lazy"
+                          className="w-full h-full object-cover"
+                          onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+                        />
+                        <span className="absolute bottom-0.5 right-0.5 bg-black/80 text-white text-[10px] px-1 rounded font-mono">
+                          {formatDuration(video.duration)}
+                        </span>
+                      </div>
+                      <div className="min-w-0">
+                        <p className={`text-xs leading-snug line-clamp-2 ${isCurrent ? 'font-semibold' : ''}`}>{video.title}</p>
+                        <p className="text-[11px] text-neutral-500 truncate">{video.uploader}</p>
+                      </div>
+                    </Link>
+                  )
+                })}
+                {playlist.hasNextPage && (
+                  <button
+                    onClick={() => playlist.fetchNextPage()}
+                    disabled={playlist.isFetchingNextPage}
+                    className="w-full py-2 text-xs text-neutral-400 hover:text-white hover:bg-neutral-800/60"
+                  >
+                    {playlist.isFetchingNextPage ? 'Loading…' : 'Load more'}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         <h3 className="text-sm font-semibold text-neutral-400 mb-3 uppercase tracking-wide">
           Up Next
         </h3>

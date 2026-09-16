@@ -44,7 +44,50 @@ data class SearchModel(
     val query: String,
     val service: String,          // which service was searched
     val items: List<VideoModel>,
-    val nextPage: String? = null  // URL for pagination (if supported)
+    val nextPage: String? = null, // URL for pagination (if supported)
+    val playlists: List<RemotePlaylistItemModel> = emptyList() // playlist results (YouTube)
+)
+
+// ─────────────────────────────────────────────
+// Remote (service-hosted) playlist models — e.g. YouTube playlists
+// ─────────────────────────────────────────────
+
+/** A playlist as it appears in search results or on a channel. */
+@Serializable
+data class RemotePlaylistItemModel(
+    val url: String,
+    val name: String,
+    val uploader: String,
+    val uploaderUrl: String = "",
+    val thumbnailUrl: String,
+    val streamCount: Long,        // -1 if unknown
+    val service: String = "youtube"
+)
+
+/**
+ * A remote playlist with (one page of) its videos — returned by GET /playlist.
+ * `nextPage` is an opaque token; pass it back as ?page= to fetch more items.
+ */
+@Serializable
+data class RemotePlaylistModel(
+    val url: String,
+    val name: String,
+    val uploader: String,
+    val uploaderUrl: String = "",
+    val thumbnailUrl: String,
+    val bannerUrl: String = "",
+    val description: String = "",
+    val streamCount: Long,
+    val videos: List<VideoModel>,
+    val nextPage: String? = null,
+    val service: String = "youtube"
+)
+
+/** One additional page of a remote playlist — returned by GET /playlist?page=. */
+@Serializable
+data class RemotePlaylistPageModel(
+    val videos: List<VideoModel>,
+    val nextPage: String? = null
 )
 
 // ─────────────────────────────────────────────

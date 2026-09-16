@@ -81,6 +81,40 @@ export interface SearchModel {
   service: string
   items: VideoModel[]
   nextPage?: string
+  playlists: RemotePlaylistItem[]
+}
+
+// ─────────────────────────────────────────────
+// Remote (service-hosted) playlists — YouTube playlists & mixes
+// ─────────────────────────────────────────────
+
+export interface RemotePlaylistItem {
+  url: string
+  name: string
+  uploader: string
+  uploaderUrl: string
+  thumbnailUrl: string
+  streamCount: number      // -1 when unknown
+  service: string
+}
+
+export interface RemotePlaylist {
+  url: string
+  name: string
+  uploader: string
+  uploaderUrl: string
+  thumbnailUrl: string
+  bannerUrl: string
+  description: string
+  streamCount: number
+  videos: VideoModel[]
+  nextPage?: string | null // opaque token for the next page
+  service: string
+}
+
+export interface RemotePlaylistPage {
+  videos: VideoModel[]
+  nextPage?: string | null
 }
 
 // ─────────────────────────────────────────────

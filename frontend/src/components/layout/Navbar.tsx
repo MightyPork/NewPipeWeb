@@ -17,6 +17,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Search, Sun, Moon, Download, Menu } from 'lucide-react'
 import { useAppStore } from '../../store/useAppStore'
 import ServiceSelector from '../common/ServiceSelector'
+import { pathForPastedUrl } from '../../utils/playback'
 
 interface NavbarProps {
   onToggleSidebar: () => void
@@ -36,6 +37,13 @@ export default function Navbar({ onToggleSidebar }: NavbarProps) {
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
     if (!query.trim()) return
+    // A pasted YouTube video/playlist link opens directly instead of searching
+    const direct = pathForPastedUrl(query)
+    if (direct) {
+      setQuery('')
+      navigate(direct)
+      return
+    }
     addRecentSearch(query.trim())
     navigate(`/search?q=${encodeURIComponent(query.trim())}&service=${service}`)
   }

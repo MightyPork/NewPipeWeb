@@ -22,6 +22,7 @@ import History       from './pages/History'
 import Watchlist     from './pages/Watchlist'
 import Library       from './pages/Library'
 import PlaylistView  from './pages/PlaylistView'
+import RemotePlaylist from './pages/RemotePlaylist'
 import Subscriptions from './pages/Subscriptions'
 import Feed          from './pages/Feed'
 import Downloads     from './pages/Downloads'
@@ -55,6 +56,7 @@ export default function App() {
                 <Route path="/history"        element={<History />}       />
                 <Route path="/watchlist"      element={<Watchlist />}     />
                 <Route path="/library"        element={<Library />}       />
+                <Route path="/playlist"       element={<RemotePlaylist />} />
                 <Route path="/playlist/:id"   element={<PlaylistView />}  />
                 <Route path="/subscriptions"  element={<Subscriptions />} />
                 <Route path="/feed"           element={<Feed />}          />
