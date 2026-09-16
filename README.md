@@ -43,7 +43,7 @@ No Google account required. No ads. No tracking.
 | Feature | Description |
 |---|---|
 | 🔍 Search | Search YouTube, SoundCloud, PeerTube without an account |
-| 📺 Watch | Play videos with quality selector (144p–2160p) |
+| 📺 Watch | Play videos with quality selector (144p–2160p); YouTube plays via its HLS manifest so every quality has audio |
 | 🎵 Audio only | Switch to background audio mode — saves bandwidth |
 | 🖼️ Picture in Picture | Float video in a small window while browsing |
 | 💬 Comments | Read comments without signing in |
@@ -417,7 +417,13 @@ Recent searches are saved locally and shown as you type.
 Click any video card to open the watch page.
 
 **Quality selector** — below the player toolbar, click any resolution badge to switch.
-Your preferred quality is applied automatically (set in Settings).
+Your preferred quality is applied automatically (set in Settings); **Auto** lets the
+player adapt to your bandwidth. On YouTube the player uses the video's HLS manifest,
+so all qualities up to 2160p play with audio. If that manifest is unavailable the
+player falls back to YouTube's muxed file, which only exists up to 360p.
+
+**Download** — saves the muxed progressive file (up to 360p on YouTube) or, in
+background-audio mode, the audio stream.
 
 **Playback speed** — use the browser's native controls (right-click the video).
 Your default speed is set in Settings.

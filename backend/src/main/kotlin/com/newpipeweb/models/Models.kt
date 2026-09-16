@@ -64,7 +64,7 @@ data class StreamModel(
     val duration: Long,
     val videoStreams: List<StreamUrl>,
     val audioStreams: List<StreamUrl>,
-    val hlsUrl: String? = null,        // for live streams
+    val hlsUrl: String? = null,        // live streams; for YouTube also the full-quality VOD manifest
     val subtitles: List<SubtitleTrack>,
     val relatedVideos: List<VideoModel>,
     val service: String = "youtube",

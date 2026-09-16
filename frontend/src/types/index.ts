@@ -69,7 +69,7 @@ export interface StreamModel {
   duration: number
   videoStreams: StreamUrl[]
   audioStreams: StreamUrl[]
-  hlsUrl?: string
+  hlsUrl?: string          // live streams; for YouTube also the full-quality VOD manifest
   subtitles: SubtitleTrack[]
   relatedVideos: VideoModel[]
   service: string

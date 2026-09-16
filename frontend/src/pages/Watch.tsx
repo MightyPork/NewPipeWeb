@@ -3,6 +3,11 @@
  *
  * The video watch page. Handles:
  * - Video playback with quality selection
+ *     · YouTube: plays the service's HLS master playlist through hls.js, which
+ *       carries every quality (144p–2160p) with separate audio; the quality
+ *       selector switches hls.js levels. Falls back to the muxed progressive
+ *       file (≤360p) if the HLS manifest cannot be played.
+ *     · Other services: progressive files or HLS as before.
  * - Subtitle track switching
  * - Picture-in-Picture (PiP)
  * - Background audio mode (audio-only stream)
@@ -36,7 +41,10 @@ import {
   Headphones, Subtitles, SkipForward,
 } from 'lucide-react'
 import type { StreamUrl, SubtitleTrack } from '../types'
-import { pickDefaultStream, proxyMediaUrl, isHlsSource } from '../utils/playback'
+import {
+  pickDefaultStream, proxyMediaUrl, isHlsSource,
+  buildQualityOptions, pickQualityOption, levelLabel, type QualityOption,
+} from '../utils/playback'
 
 export default function Watch() {
   const { id } = useParams<{ id: string }>()
@@ -77,10 +85,17 @@ export default function Watch() {
   // ─── Local UI state ───────────────────────────────────────
   const videoRef = useRef<HTMLVideoElement>(null)
   const trackRef = useRef<HTMLTrackElement>(null)
+  const hlsRef = useRef<Hls | null>(null)
 
+  // `selectedStream` is the progressive file: the actual source for non-HLS
+  // playback, and the download source / fallback while HLS is in use.
   const [selectedStream, setSelectedStream] = useState<StreamUrl | null>(null)
   const [useHls, setUseHls] = useState(false)
   const [hlsSourceUrl, setHlsSourceUrl] = useState<string | null>(null)
+  const [hlsFailed, setHlsFailed] = useState(false)
+  const [qualityOptions, setQualityOptions] = useState<QualityOption[]>([])
+  const [manualLevel, setManualLevel] = useState<number>(-1) // hls.js level index; -1 = auto
+  const [activeLevelLabel, setActiveLevelLabel] = useState<string | null>(null)
   const [selectedSubtitle, setSelectedSubtitle] = useState<SubtitleTrack | null>(null)
   const [showComments, setShowComments] = useState(false)
   const [showPlaylistModal, setShowPlaylistModal] = useState(false)
@@ -113,6 +128,7 @@ export default function Watch() {
     setSelectedStream(picked.stream)
     setUseHls(picked.useHls)
     setHlsSourceUrl(picked.hlsUrl)
+    setHlsFailed(false)
 
     if (subtitlesEnabled && stream.subtitles.length > 0) {
       const preferred = stream.subtitles.find(s => s.languageCode === preferredSubtitleLang)
@@ -120,31 +136,90 @@ export default function Watch() {
     }
   }, [stream?.id, preferredQuality, subtitlesEnabled, preferredSubtitleLang])
 
-  // HLS playback (PeerTube and other HLS-only sources)
+  // ─────────────────────────────────────────────────────────
+  // HLS playback (YouTube full-quality manifest; PeerTube and other HLS sources)
+  // ─────────────────────────────────────────────────────────
   useEffect(() => {
     const video = videoRef.current
     if (!video || !playbackUrl || !useHls) return
 
-    if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.src = playbackUrl
-      return
+    if (Hls.isSupported()) {
+      const hls = new Hls({
+        // Every request (manifest, playlists, segments) goes through our proxy —
+        // YouTube media URLs are bound to the backend's IP and block CORS.
+        xhrSetup: (xhr, url) => {
+          xhr.open('GET', proxyMediaUrl(url, stream?.title), true)
+        },
+        autoStartLoad: false,
+      })
+      hlsRef.current = hls
+
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        const options = buildQualityOptions(hls.levels)
+        setQualityOptions(options)
+
+        // Lock to the preferred quality from Settings (closest without exceeding);
+        // the user can switch to "Auto" or another quality from the selector.
+        const initial = pickQualityOption(options, preferredQuality)
+        const level = initial ? initial.levelIndex : -1
+        hls.loadLevel = level
+        setManualLevel(level)
+
+        // The resume effect below may already have set currentTime on the element.
+        const start = video.currentTime > 0 ? video.currentTime : -1
+        hls.startLoad(start)
+        video.play().catch(() => { })
+      })
+
+      hls.on(Hls.Events.LEVEL_SWITCHED, (_evt, data) => {
+        const level = hls.levels[data.level]
+        setActiveLevelLabel(level ? levelLabel(level) : null)
+      })
+
+      hls.on(Hls.Events.ERROR, (_evt, data) => {
+        if (!data.fatal) return
+        console.warn('[HLS] fatal error', data.type, data.details)
+        if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+          hls.recoverMediaError()
+          return
+        }
+        // Network / manifest failure: fall back to the progressive file if we have one.
+        hls.destroy()
+        hlsRef.current = null
+        setHlsFailed(true)
+        setUseHls(false)
+        setHlsSourceUrl(null)
+        setQualityOptions([])
+      })
+
+      hls.loadSource(playbackUrl)
+      hls.attachMedia(video)
+
+      return () => {
+        hls.destroy()
+        if (hlsRef.current === hls) hlsRef.current = null
+        // The level list belongs to this hls.js instance; clear it only here.
+        // (The stream-load effect above also re-runs on subtitle/quality
+        // preference changes without restarting playback.)
+        setQualityOptions([])
+        setActiveLevelLabel(null)
+      }
     }
 
-    if (!Hls.isSupported()) return
-
-    const hls = new Hls({
-      xhrSetup: (xhr, url) => {
-        xhr.open('GET', proxyMediaUrl(url, stream?.title), true)
-      },
-    })
-    hls.loadSource(playbackUrl)
-    hls.attachMedia(video)
-    hls.on(Hls.Events.MANIFEST_PARSED, () => {
-      video.play().catch(() => { })
-    })
-
-    return () => hls.destroy()
+    // No MSE (e.g. iOS Safari): native HLS. Only the manifest URL is proxied,
+    // so this works for services whose media URLs are not IP-bound.
+    if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = playbackUrl
+    }
   }, [playbackUrl, useHls])
+
+  /** Quality selector for HLS playback. Pass -1 for automatic. */
+  const selectHlsLevel = (level: number) => {
+    const hls = hlsRef.current
+    if (!hls) return
+    hls.currentLevel = level
+    setManualLevel(level)
+  }
 
   // ─────────────────────────────────────────────────────────
   // Restore resume position after video element loads
@@ -282,13 +357,14 @@ export default function Watch() {
     } else if (!newMode) {
       const picked = pickDefaultStream(stream, preferredQuality)
       setSelectedStream(picked.stream)
-      setUseHls(picked.useHls)
-      setHlsSourceUrl(picked.hlsUrl)
+      setUseHls(picked.useHls && !hlsFailed)
+      setHlsSourceUrl(hlsFailed ? null : picked.hlsUrl)
     }
   }
 
   // ─────────────────────────────────────────────────────────
-  // Download handler
+  // Download handler — downloads the progressive file (muxed video+audio,
+  // ≤360p on YouTube) or the audio stream in background-audio mode.
   // ─────────────────────────────────────────────────────────
   const handleDownload = async () => {
     if (!selectedStream || !stream) return
@@ -352,6 +428,10 @@ export default function Watch() {
   if (isLoading) return <LoadingSpinner text="Loading video..." />
   if (isError || !stream) return <ErrorMessage message="Could not load video." onRetry={refetch} />
 
+  const showHlsQuality = useHls && qualityOptions.length > 0 && !backgroundAudioMode
+  const progressiveOptions = stream.videoStreams.filter(s => !s.isVideoOnly)
+  const showProgressiveQuality = !useHls && progressiveOptions.length > 1 && !backgroundAudioMode
+
   return (
     <div className="flex flex-col lg:flex-row gap-6 p-6 max-w-screen-2xl mx-auto">
 
@@ -373,7 +453,7 @@ export default function Watch() {
               onVolumeChange={handleVolumeChange}
               onRateChange={handleRateChange}
             >
-              {selectedSubtitle && subtitlesEnabled && !useHls && (
+              {selectedSubtitle && subtitlesEnabled && (
                 <track
                   ref={trackRef}
                   kind="subtitles"
@@ -454,29 +534,60 @@ export default function Watch() {
           )}
         </div>
 
-        {/* ── Quality selector ───────────────────────────── */}
-        {stream.videoStreams.filter(s => !s.isVideoOnly).length > 0 && !backgroundAudioMode && (
+        {/* ── Quality selector (HLS levels) ──────────────── */}
+        {showHlsQuality && (
           <div className="mt-3 flex items-center gap-2 flex-wrap">
             <span className="text-xs text-neutral-400">Quality:</span>
-            {stream.videoStreams
-              .filter(s => !s.isVideoOnly)
-              .map(s => (
-                <button
-                  key={s.url}
-                  onClick={() => {
-                    setSelectedStream(s)
-                    setUseHls(isHlsSource(s.url, s.format))
-                    setHlsSourceUrl(null)
-                  }}
-                  className={`text-xs px-2.5 py-1 rounded-lg transition-colors
-                    ${selectedStream?.url === s.url
-                      ? 'bg-red-600 text-white'
-                      : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700'}`}
-                >
-                  {s.quality}
-                </button>
-              ))}
+            <button
+              onClick={() => selectHlsLevel(-1)}
+              className={`text-xs px-2.5 py-1 rounded-lg transition-colors
+                ${manualLevel === -1
+                  ? 'bg-red-600 text-white'
+                  : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700'}`}
+            >
+              Auto{manualLevel === -1 && activeLevelLabel ? ` (${activeLevelLabel})` : ''}
+            </button>
+            {qualityOptions.map(opt => (
+              <button
+                key={opt.label}
+                onClick={() => selectHlsLevel(opt.levelIndex)}
+                className={`text-xs px-2.5 py-1 rounded-lg transition-colors
+                  ${manualLevel === opt.levelIndex
+                    ? 'bg-red-600 text-white'
+                    : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700'}`}
+              >
+                {opt.label}
+              </button>
+            ))}
           </div>
+        )}
+
+        {/* ── Quality selector (progressive files) ──────── */}
+        {showProgressiveQuality && (
+          <div className="mt-3 flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-neutral-400">Quality:</span>
+            {progressiveOptions.map(s => (
+              <button
+                key={s.url}
+                onClick={() => {
+                  setSelectedStream(s)
+                  setUseHls(isHlsSource(s.url, s.format))
+                  setHlsSourceUrl(null)
+                }}
+                className={`text-xs px-2.5 py-1 rounded-lg transition-colors
+                  ${selectedStream?.url === s.url
+                    ? 'bg-red-600 text-white'
+                    : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700'}`}
+              >
+                {s.quality}
+              </button>
+            ))}
+          </div>
+        )}
+        {hlsFailed && !backgroundAudioMode && (
+          <p className="mt-2 text-xs text-yellow-500">
+            High-quality stream unavailable — playing the {selectedStream?.quality ?? 'fallback'} file.
+          </p>
         )}
 
         {/* ── Subtitle track selector ────────────────────── */}
@@ -550,7 +661,12 @@ export default function Watch() {
               </button>
 
               {/* Download */}
-              <button onClick={handleDownload} className="btn-secondary">
+              <button
+                onClick={handleDownload}
+                disabled={!selectedStream}
+                title={selectedStream ? `Download ${selectedStream.quality}` : 'No downloadable file'}
+                className="btn-secondary disabled:opacity-50"
+              >
                 <Download size={14} className="inline mr-1" />
                 Download
               </button>
