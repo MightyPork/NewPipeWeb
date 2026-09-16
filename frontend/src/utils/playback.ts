@@ -67,3 +67,26 @@ export function pickDefaultStream(
 
   return { stream: null, useHls: false, hlsUrl: null }
 }
+
+// ─────────────────────────────────────────────
+// Display helpers
+// ─────────────────────────────────────────────
+
+export function formatCount(n: number): string {
+  if (n < 0) return ''
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1).replace(/\.0$/, '')}B`
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 100_000 ? 0 : 1).replace(/\.0$/, '')}K`
+  return `${n}`
+}
+
+/** Prefer the exact ISO date when present, otherwise the service's textual date. */
+export function formatUploadDate(iso: string | null | undefined, textual: string): string {
+  if (iso) {
+    const d = new Date(iso)
+    if (!Number.isNaN(d.getTime())) {
+      return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+    }
+  }
+  return textual
+}

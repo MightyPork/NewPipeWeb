@@ -3,6 +3,7 @@
  *
  * The video watch page. Handles:
  * - Video playback with quality selection
+ * - Video metadata (upload date, views, likes, uploader, description)
  * - Subtitle track switching
  * - Picture-in-Picture (PiP)
  * - Background audio mode (audio-only stream)
@@ -33,10 +34,29 @@ import { useAppStore } from '../store/useAppStore'
 import {
   ThumbsUp, Download, BookmarkPlus, BookmarkCheck,
   Bell, BellOff, ListVideo, PictureInPicture2,
-  Headphones, Subtitles, SkipForward,
+  Headphones, Subtitles, SkipForward, Eye, CalendarDays,
+  BadgeCheck, ChevronDown, ChevronUp,
 } from 'lucide-react'
 import type { StreamUrl, SubtitleTrack } from '../types'
-import { pickDefaultStream, proxyMediaUrl, isHlsSource } from '../utils/playback'
+import {
+  pickDefaultStream, proxyMediaUrl, isHlsSource,
+  formatCount, formatUploadDate,
+} from '../utils/playback'
+
+/** Turn bare URLs in plain text into links (descriptions are plain text from the backend). */
+function Linkify({ text }: { text: string }) {
+  const parts = text.split(/(https?:\/\/[^\s<>"']+)/g)
+  return (
+    <>
+      {parts.map((part, i) =>
+        /^https?:\/\//.test(part)
+          ? <a key={i} href={part} target="_blank" rel="noopener noreferrer"
+               className="text-blue-400 hover:underline break-all">{part}</a>
+          : <span key={i}>{part}</span>
+      )}
+    </>
+  )
+}
 
 export default function Watch() {
   const { id } = useParams<{ id: string }>()
@@ -83,6 +103,7 @@ export default function Watch() {
   const [hlsSourceUrl, setHlsSourceUrl] = useState<string | null>(null)
   const [selectedSubtitle, setSelectedSubtitle] = useState<SubtitleTrack | null>(null)
   const [showComments, setShowComments] = useState(false)
+  const [showDescription, setShowDescription] = useState(false)
   const [showPlaylistModal, setShowPlaylistModal] = useState(false)
   const [isPiP, setIsPiP] = useState(false)
   const [skippedCount, setSkippedCount] = useState(0) // how many segments skipped this session
@@ -338,7 +359,7 @@ export default function Watch() {
         channelId: contentKey,
         channelName: stream.uploader,
         channelUrl: stream.uploaderUrl,
-        avatarUrl: '',
+        avatarUrl: stream.uploaderAvatarUrl,
       })
     }
   }
@@ -351,6 +372,8 @@ export default function Watch() {
   }
   if (isLoading) return <LoadingSpinner text="Loading video..." />
   if (isError || !stream) return <ErrorMessage message="Could not load video." onRetry={refetch} />
+
+  const uploadDateLabel = formatUploadDate(stream.uploadDateIso, stream.uploadDate)
 
   return (
     <div className="flex flex-col lg:flex-row gap-6 p-6 max-w-screen-2xl mx-auto">
@@ -499,18 +522,64 @@ export default function Watch() {
           </div>
         )}
 
-        {/* ── Title and action buttons ───────────────────── */}
+        {/* ── Title, metadata and action buttons ─────────── */}
         <div className="mt-4">
           <h1 className="text-xl font-bold leading-snug">{stream.title}</h1>
 
+          {/* Views · date · likes */}
+          <div className="flex items-center gap-x-3 gap-y-1 mt-1.5 text-sm text-neutral-400 flex-wrap">
+            {stream.isLive && (
+              <span className="bg-red-600 text-white text-xs px-1.5 py-0.5 rounded font-bold">LIVE</span>
+            )}
+            {stream.viewCount >= 0 && (
+              <span className="flex items-center gap-1">
+                <Eye size={14} />
+                {stream.viewCount.toLocaleString()} views
+              </span>
+            )}
+            {uploadDateLabel && (
+              <span className="flex items-center gap-1" title={stream.uploadDateIso ?? undefined}>
+                <CalendarDays size={14} />
+                {uploadDateLabel}
+              </span>
+            )}
+            {stream.likeCount >= 0 && (
+              <span className="flex items-center gap-1">
+                <ThumbsUp size={14} />
+                {formatCount(stream.likeCount)}
+              </span>
+            )}
+            {stream.category && <span className="hidden sm:inline">· {stream.category}</span>}
+          </div>
+
           <div className="flex items-center justify-between mt-3 flex-wrap gap-3">
-            {/* Channel link */}
-            <Link
-              to={`/channel/${id}`}
-              className="text-sm text-neutral-300 hover:text-white transition-colors font-medium"
-            >
-              {stream.uploader}
-            </Link>
+            {/* Uploader */}
+            <div className="flex items-center gap-3 min-w-0">
+              {stream.uploaderAvatarUrl && (
+                <img
+                  src={stream.uploaderAvatarUrl}
+                  alt=""
+                  className="w-10 h-10 rounded-full bg-neutral-800 object-cover shrink-0"
+                  onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+                />
+              )}
+              <div className="min-w-0">
+                <div className="flex items-center gap-1">
+                  <Link
+                    to={`/channel/${id}`}
+                    className="text-sm text-neutral-200 hover:text-white transition-colors font-medium truncate"
+                  >
+                    {stream.uploader}
+                  </Link>
+                  {stream.uploaderVerified && <BadgeCheck size={14} className="text-neutral-400 shrink-0" />}
+                </div>
+                {stream.uploaderSubscriberCount >= 0 && (
+                  <p className="text-xs text-neutral-500">
+                    {formatCount(stream.uploaderSubscriberCount)} subscribers
+                  </p>
+                )}
+              </div>
+            </div>
 
             {/* Action buttons */}
             <div className="flex items-center gap-2 flex-wrap">
@@ -556,6 +625,37 @@ export default function Watch() {
               </button>
             </div>
           </div>
+
+          {/* Description */}
+          {stream.description && (
+            <div className="mt-4 bg-neutral-900 rounded-xl p-4">
+              <p className={`text-sm text-neutral-300 whitespace-pre-line break-words
+                             ${showDescription ? '' : 'line-clamp-3'}`}>
+                <Linkify text={stream.description} />
+              </p>
+              {stream.tags.length > 0 && showDescription && (
+                <div className="flex flex-wrap gap-1.5 mt-3">
+                  {stream.tags.slice(0, 20).map(tag => (
+                    <Link
+                      key={tag}
+                      to={`/search?q=${encodeURIComponent(tag)}&service=${stream.service}`}
+                      className="text-xs text-blue-400 hover:underline"
+                    >
+                      #{tag.replace(/\s+/g, '')}
+                    </Link>
+                  ))}
+                </div>
+              )}
+              <button
+                onClick={() => setShowDescription(v => !v)}
+                className="mt-2 text-xs font-medium text-neutral-400 hover:text-white flex items-center gap-1"
+              >
+                {showDescription
+                  ? <><ChevronUp size={14} /> Show less</>
+                  : <><ChevronDown size={14} /> Show more</>}
+              </button>
+            </div>
+          )}
         </div>
 
         {/* ── Comments section ────────────────────────────── */}

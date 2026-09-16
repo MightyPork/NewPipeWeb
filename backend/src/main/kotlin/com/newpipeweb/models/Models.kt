@@ -68,7 +68,20 @@ data class StreamModel(
     val subtitles: List<SubtitleTrack>,
     val relatedVideos: List<VideoModel>,
     val service: String = "youtube",
-    val thumbnailUrl: String = ""
+    val thumbnailUrl: String = "",
+
+    // ── Metadata ──
+    val uploadDate: String = "",       // textual, as shown by the service (e.g. "16 Sep 2026")
+    val uploadDateIso: String? = null, // ISO-8601 instant when the service exposes an exact date
+    val viewCount: Long = -1,
+    val likeCount: Long = -1,
+    val description: String = "",      // plain text with newlines
+    val uploaderAvatarUrl: String = "",
+    val uploaderSubscriberCount: Long = -1,
+    val uploaderVerified: Boolean = false,
+    val isLive: Boolean = false,
+    val category: String = "",
+    val tags: List<String> = emptyList()
 )
 
 /** A single playable stream URL with quality metadata */

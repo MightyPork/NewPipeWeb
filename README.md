@@ -44,6 +44,7 @@ No Google account required. No ads. No tracking.
 |---|---|
 | 🔍 Search | Search YouTube, SoundCloud, PeerTube without an account |
 | 📺 Watch | Play videos with quality selector (144p–2160p) |
+| ℹ️ Metadata | Upload date, views, likes, uploader, description and tags on the watch page |
 | 🎵 Audio only | Switch to background audio mode — saves bandwidth |
 | 🖼️ Picture in Picture | Float video in a small window while browsing |
 | 💬 Comments | Read comments without signing in |
@@ -418,6 +419,9 @@ Click any video card to open the watch page.
 
 **Quality selector** — below the player toolbar, click any resolution badge to switch.
 Your preferred quality is applied automatically (set in Settings).
+
+**Metadata** — upload date, view count, likes and category are shown under the title,
+followed by the uploader (with subscriber count) and a collapsible description.
 
 **Playback speed** — use the browser's native controls (right-click the video).
 Your default speed is set in Settings.

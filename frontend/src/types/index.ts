@@ -74,6 +74,19 @@ export interface StreamModel {
   relatedVideos: VideoModel[]
   service: string
   thumbnailUrl: string
+
+  // Metadata
+  uploadDate: string       // textual, as shown by the service
+  uploadDateIso?: string | null
+  viewCount: number        // -1 when unknown
+  likeCount: number        // -1 when unknown
+  description: string      // plain text
+  uploaderAvatarUrl: string
+  uploaderSubscriberCount: number
+  uploaderVerified: boolean
+  isLive: boolean
+  category: string
+  tags: string[]
 }
 
 export interface SearchModel {

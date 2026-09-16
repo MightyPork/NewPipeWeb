@@ -32,6 +32,7 @@ import org.schabi.newpipe.extractor.channel.ChannelInfo
 import org.schabi.newpipe.extractor.comments.CommentsInfo
 import org.schabi.newpipe.extractor.InfoItem
 import org.schabi.newpipe.extractor.kiosk.KioskInfo
+import org.schabi.newpipe.extractor.stream.Description
 import org.schabi.newpipe.extractor.localization.ContentCountry
 import org.schabi.newpipe.extractor.localization.Localization
 import org.schabi.newpipe.extractor.search.SearchInfo
@@ -258,9 +259,57 @@ object ExtractorService {
             subtitles     = subtitles,
             relatedVideos = related,
             service       = serviceKeyFromExtractorId(service.serviceId),
-            thumbnailUrl  = streamInfo.thumbnails.lastOrNull()?.url ?: ""
+            thumbnailUrl  = streamInfo.thumbnails.lastOrNull()?.url ?: "",
+
+            uploadDate              = streamInfo.textualUploadDate ?: "",
+            uploadDateIso           = runCatching { streamInfo.uploadDate?.instant?.toString() }.getOrNull(),
+            viewCount               = streamInfo.viewCount,
+            likeCount               = streamInfo.likeCount,
+            description             = descriptionToPlainText(streamInfo.description),
+            uploaderAvatarUrl       = streamInfo.uploaderAvatars.lastOrNull()?.url ?: "",
+            uploaderSubscriberCount = streamInfo.uploaderSubscriberCount,
+            uploaderVerified        = streamInfo.isUploaderVerified,
+            isLive                  = streamInfo.streamType == StreamType.LIVE_STREAM
+                                      || streamInfo.streamType == StreamType.AUDIO_LIVE_STREAM,
+            category                = streamInfo.category ?: "",
+            tags                    = streamInfo.tags ?: emptyList()
         )
     }
+
+    /**
+     * NewPipeExtractor returns YouTube descriptions as HTML (links, <br>).
+     * Flatten to plain text so the frontend never has to render untrusted HTML.
+     */
+    private fun descriptionToPlainText(description: Description?): String {
+        val content = description?.content ?: return ""
+        if (description.type != Description.HTML) return content
+        return content
+            // YouTube shortens link texts ("https://example.com/very/long/pa...");
+            // keep the real target instead, unwrapping youtube.com/redirect?q=… links.
+            .replace(Regex("(?is)<a\\s[^>]*href=\"([^\"]*)\"[^>]*>(.*?)</a>")) { m ->
+                val href = decodeEntities(m.groupValues[1])
+                val text = m.groupValues[2]
+                val target = Regex("[?&]q=([^&]+)").find(href)
+                    ?.groupValues?.get(1)
+                    ?.let { runCatching { java.net.URLDecoder.decode(it, "UTF-8") }.getOrNull() }
+                    ?: href
+                if (text.trimEnd().endsWith("...") && target.startsWith("http")) target else text
+            }
+            .replace(Regex("(?i)<br\\s*/?>"), "\n")
+            .replace(Regex("(?i)</p>"), "\n")
+            .replace(Regex("<[^>]+>"), "")
+            .let(::decodeEntities)
+            .trim()
+    }
+
+    private fun decodeEntities(text: String): String = text
+        .replace("&nbsp;", " ")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace(Regex("&#(\\d+);")) { m -> m.groupValues[1].toIntOrNull()?.let { String(Character.toChars(it)) } ?: m.value }
+        .replace("&amp;", "&")
 
     // ─────────────────────────────────────────────────────────
     // CHANNEL (by full URL)
