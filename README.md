@@ -8,6 +8,17 @@ Licensed under [GPL-3.0](LICENSE) — the same license as NewPipeExtractor.
 No Google account required. No ads. No tracking.
 
 ---
+## Branches
+
+- `dev` - active development happens here. If you want to contribute, branch off `dev` and open your PR against `dev`.
+- `main` - stable, released code. Only updated from `dev` once changes have been reviewed and tested.
+
+## Contributing
+
+1. Fork the repo and create your branch from `dev`.
+2. Make your changes and open a pull request back into `dev`.
+3. Once reviewed and tested, changes get merged from `dev` into `main`.
+---
 
 ## Table of Contents
 
