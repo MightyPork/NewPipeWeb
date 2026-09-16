@@ -101,3 +101,7 @@ logs/
 *.jar
 *.zip
 *.tar.gz
+# ========================================
+# Docker Compose local overrides
+# ========================================
+docker-compose.override.yml
