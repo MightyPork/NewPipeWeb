@@ -17,7 +17,7 @@ import {
   useAddVideoToPlaylist,
   useCreatePlaylist,
 } from '../../hooks'
-import { thumbnailUrl } from '../../utils/playback'
+import { thumbnailUrl as resolveThumbnailUrl } from '../../utils/playback'
 
 interface AddToPlaylistModalProps {
   videoId: string
@@ -110,7 +110,7 @@ export default function AddToPlaylistModal({
                 {/* Thumbnail or placeholder */}
                 <div className="w-10 h-8 bg-neutral-800 rounded-lg overflow-hidden shrink-0 flex items-center justify-center">
                   {pl.thumbnailUrl
-                    ? <img src={thumbnailUrl(pl.thumbnailUrl)} alt="" className="w-full h-full object-cover" />
+                    ? <img src={resolveThumbnailUrl(pl.thumbnailUrl)} alt="" className="w-full h-full object-cover" />
                     : <ListVideo size={16} className="text-neutral-600" />
                   }
                 </div>
