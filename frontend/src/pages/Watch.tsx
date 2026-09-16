@@ -36,7 +36,7 @@ import {
   Headphones, Subtitles, SkipForward,
 } from 'lucide-react'
 import type { StreamUrl, SubtitleTrack } from '../types'
-import { pickDefaultStream, proxyMediaUrl, isHlsSource } from '../utils/playback'
+import { pickDefaultStream, proxyMediaUrl, isHlsSource, youtubeChannelIdFromUrl } from '../utils/playback'
 
 export default function Watch() {
   const { id } = useParams<{ id: string }>()
@@ -77,6 +77,8 @@ export default function Watch() {
   // ─── Local UI state ───────────────────────────────────────
   const videoRef = useRef<HTMLVideoElement>(null)
   const trackRef = useRef<HTMLTrackElement>(null)
+  const resumeAppliedFor = useRef<string | null>(null) // contentKey the resume position was applied to
+  const lastSavedSecond = useRef(-1)                    // last second written to history (dedupes timeupdate)
 
   const [selectedStream, setSelectedStream] = useState<StreamUrl | null>(null)
   const [useHls, setUseHls] = useState(false)
@@ -96,6 +98,10 @@ export default function Watch() {
 
   const contentKey = stream?.id ?? id ?? contentUrl
 
+  // YouTube channel id (UC…/@handle) derived from the uploader URL — the
+  // /channel/:id route and subscriptions are keyed by it, not by the video id.
+  const channelId = youtubeChannelIdFromUrl(stream?.uploaderUrl) ?? stream?.uploaderUrl ?? ''
+
   const playbackSourceUrl = useMemo(() => {
     if (useHls && hlsSourceUrl) return hlsSourceUrl
     return selectedStream?.url ?? ''
@@ -113,6 +119,7 @@ export default function Watch() {
     setSelectedStream(picked.stream)
     setUseHls(picked.useHls)
     setHlsSourceUrl(picked.hlsUrl)
+    lastSavedSecond.current = -1
 
     if (subtitlesEnabled && stream.subtitles.length > 0) {
       const preferred = stream.subtitles.find(s => s.languageCode === preferredSubtitleLang)
@@ -146,19 +153,28 @@ export default function Watch() {
     return () => hls.destroy()
   }, [playbackUrl, useHls])
 
+  /**
+   * Resume position from history. Evaluated once per video, as soon as history
+   * is available, so later history refreshes (we save every 5 s) never seek.
+   */
+  const consumeResumePosition = useCallback((): number => {
+    if (!history || resumeAppliedFor.current === contentKey) return -1
+    resumeAppliedFor.current = contentKey
+    const entry = history.find(h => h.videoId === contentKey)
+    // Only restore if more than 10 seconds in (ignore near-start)
+    return entry && entry.watchedSeconds > 10 ? entry.watchedSeconds : -1
+  }, [history, contentKey])
+
   // ─────────────────────────────────────────────────────────
-  // Restore resume position after video element loads
+  // Restore resume position once history is available. Works before the
+  // media has loaded too (the browser keeps it as the start position).
   // ─────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!videoRef.current || !id || !history) return
-
-    // Find the last watch position for this video from history
-    const entry = history.find(h => h.videoId === contentKey)
-    if (entry && entry.watchedSeconds > 10) {
-      // Only restore if more than 10 seconds in (ignore near-start)
-      videoRef.current.currentTime = entry.watchedSeconds
-    }
-  }, [playbackUrl, history, contentKey])
+    const video = videoRef.current
+    if (!video || !playbackUrl) return
+    const start = consumeResumePosition()
+    if (start > 0) video.currentTime = start
+  }, [playbackUrl, consumeResumePosition])
 
   // ─────────────────────────────────────────────────────────
   // Sync volume and playback rate from stored preferences
@@ -207,10 +223,11 @@ export default function Watch() {
       }
     }
 
-    // Save progress every ~5 seconds (250ms interval × 20 = 5s)
-    // We use a simple modulo trick on the floored second count
+    // Save progress every 5 seconds (timeupdate fires several times a second,
+    // so remember the last saved second to avoid duplicate writes)
     const currentSec = Math.floor(video.currentTime)
-    if (currentSec > 0 && currentSec % 5 === 0) {
+    if (currentSec > 0 && currentSec % 5 === 0 && currentSec !== lastSavedSecond.current) {
+      lastSavedSecond.current = currentSec
       addToHistory.mutate({
         videoId: contentKey,
         title: stream.title,
@@ -327,7 +344,7 @@ export default function Watch() {
   // ─────────────────────────────────────────────────────────
   // Subscribe / unsubscribe
   // ─────────────────────────────────────────────────────────
-  const sub = subscriptions?.find(s => s.channelId === contentKey)
+  const sub = subscriptions?.find(s => s.channelId === channelId || s.channelUrl === stream?.uploaderUrl)
 
   const handleSubscribeToggle = () => {
     if (!stream || !stream.uploaderUrl) return
@@ -335,7 +352,7 @@ export default function Watch() {
       unsubscribe.mutate(sub.id)
     } else {
       subscribe.mutate({
-        channelId: contentKey,
+        channelId,
         channelName: stream.uploader,
         channelUrl: stream.uploaderUrl,
         avatarUrl: '',
@@ -351,6 +368,11 @@ export default function Watch() {
   }
   if (isLoading) return <LoadingSpinner text="Loading video..." />
   if (isError || !stream) return <ErrorMessage message="Could not load video." onRetry={refetch} />
+
+  // Only YouTube channels have an in-app page (/channel/:id expects a UC… id)
+  const channelLink = stream.service === 'youtube' && youtubeChannelIdFromUrl(stream.uploaderUrl)
+    ? `/channel/${youtubeChannelIdFromUrl(stream.uploaderUrl)}`
+    : null
 
   return (
     <div className="flex flex-col lg:flex-row gap-6 p-6 max-w-screen-2xl mx-auto">
@@ -505,12 +527,16 @@ export default function Watch() {
 
           <div className="flex items-center justify-between mt-3 flex-wrap gap-3">
             {/* Channel link */}
-            <Link
-              to={`/channel/${id}`}
-              className="text-sm text-neutral-300 hover:text-white transition-colors font-medium"
-            >
-              {stream.uploader}
-            </Link>
+            {channelLink ? (
+              <Link
+                to={channelLink}
+                className="text-sm text-neutral-300 hover:text-white transition-colors font-medium"
+              >
+                {stream.uploader}
+              </Link>
+            ) : (
+              <span className="text-sm text-neutral-300 font-medium">{stream.uploader}</span>
+            )}
 
             {/* Action buttons */}
             <div className="flex items-center gap-2 flex-wrap">

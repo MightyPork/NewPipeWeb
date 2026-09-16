@@ -8,6 +8,13 @@ export function watchPath(video: { id: string; url?: string }): string {
   return `/watch/${video.id}`
 }
 
+/** YouTube channel id (UC...) or handle from an uploader URL; null for other services. */
+export function youtubeChannelIdFromUrl(url: string | undefined): string | null {
+  if (!url) return null
+  const m = url.match(/youtube\.com\/(?:channel\/)?(UC[\w-]{20,}|@[\w.-]+)/)
+  return m ? m[1] : null
+}
+
 /**
  * Thumbnails load fine cross-origin in <img> tags — no proxy needed.
  * Proxying every card thumbnail was overloading /api/proxy and causing 500s.
